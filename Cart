@@ -1,0 +1,439 @@
+
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ShoppingBag, Trash2, Minus, Plus, Loader2, CheckCircle2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { useLanguage } from "../components/LanguageContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+export default function Cart() {
+  const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [orderComplete, setOrderComplete] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  
+  const [shippingInfo, setShippingInfo] = useState({
+    full_name: "",
+    address_line1: "",
+    address_line2: "",
+    city: "",
+    state: "",
+    postal_code: "",
+    country: ""
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    
+    const fetchUser = async () => {
+      try {
+        const user = await base44.auth.me();
+        if (mounted) {
+          setCurrentUser(user);
+        }
+      } catch (error) {
+        console.error("Error fetching user:", error);
+      }
+    };
+    fetchUser();
+    
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const { data: cartItems = [], isLoading } = useQuery({
+    queryKey: ['cartItems', currentUser?.email],
+    queryFn: async () => {
+      if (!currentUser?.email) return [];
+      return base44.entities.CartItem.filter({ user: currentUser.email });
+    },
+    enabled: !!currentUser?.email,
+    initialData: [],
+  });
+
+  const updateQuantityMutation = useMutation({
+    mutationFn: ({ id, quantity }) => base44.entities.CartItem.update(id, {
+      quantity,
+      total_price: cartItems.find(item => item.id === id)?.price_per_item * quantity
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cartItems'] });
+    },
+  });
+
+  const removeItemMutation = useMutation({
+    mutationFn: (id) => base44.entities.CartItem.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cartItems'] });
+    },
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: async (orderData) => base44.entities.Order.create(orderData),
+    onSuccess: async () => {
+      for (const item of cartItems) {
+        await base44.entities.CartItem.delete(item.id);
+      }
+      queryClient.invalidateQueries({ queryKey: ['cartItems'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setOrderComplete(true);
+    },
+  });
+
+  const handleQuantityChange = (itemId, newQuantity) => {
+    if (newQuantity < 1) return;
+    updateQuantityMutation.mutate({ id: itemId, quantity: newQuantity });
+  };
+
+  const handleRemoveItem = (itemId) => {
+    removeItemMutation.mutate(itemId);
+  };
+
+  const calculateSubtotal = () => {
+    return cartItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
+  };
+
+  const calculateShipping = () => {
+    return cartItems.length > 0 ? 25 : 0; // 25 SAR shipping
+  };
+
+  const calculateTotal = () => {
+    return calculateSubtotal() + calculateShipping();
+  };
+
+  const handleCheckout = async () => {
+    if (!currentUser) return;
+    
+    setIsProcessing(true);
+
+    const orderData = {
+      user: currentUser.email,
+      order_number: `ORD-${Date.now()}`,
+      items: cartItems.map(item => ({
+        photo_title: item.photo_title,
+        photo_url: item.photo_url,
+        print_size: item.print_size,
+        quantity: item.quantity,
+        price: item.total_price
+      })),
+      total_amount: calculateTotal(),
+      shipping_address: shippingInfo,
+      status: "processing",
+      order_date: new Date().toISOString()
+    };
+
+    await createOrderMutation.mutateAsync(orderData);
+    setIsProcessing(false);
+  };
+
+  const isFormValid = () => {
+    return shippingInfo.full_name && 
+           shippingInfo.address_line1 && 
+           shippingInfo.city && 
+           shippingInfo.postal_code && 
+           shippingInfo.country;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center">
+        <Loader2 className="w-12 h-12 animate-spin text-black" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F5F5F7] py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mb-8">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black mb-2">
+            {t('shoppingCart')}
+          </h1>
+          <p className="text-lg sm:text-xl text-gray-600 font-light">
+            {cartItems.length} {cartItems.length === 1 ? t('item') : t('items')} {t('itemsInCart')}
+          </p>
+        </div>
+
+        {cartItems.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-20"
+          >
+            <div className="w-24 h-24 bg-black rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <ShoppingBag className="w-12 h-12 text-white" />
+            </div>
+            <h3 className="text-2xl font-semibold text-black mb-3">
+              {t('cartEmpty')}
+            </h3>
+            <p className="text-gray-600 mb-8">
+              {t('cartEmptyDesc')}
+            </p>
+            <Link to={createPageUrl("Gallery")}>
+              <Button className="bg-black text-white hover:bg-gray-900 rounded-xl px-8 py-4 text-lg font-medium">
+                {t('viewGallery')}
+              </Button>
+            </Link>
+          </motion.div>
+        ) : (
+          <div className="grid lg:grid-cols-3 gap-6 lg:gap-8">
+            {/* Cart Items */}
+            <div className="lg:col-span-2 space-y-4">
+              <AnimatePresence>
+                {cartItems.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                  >
+                    <Card className="p-4 bg-white border-none shadow-lg rounded-2xl">
+                      <div className="flex gap-3 sm:gap-4">
+                        {/* Image */}
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0 bg-[#1A1A1A] rounded-xl overflow-hidden">
+                          <img
+                            src={item.photo_url}
+                            alt={item.photo_title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        
+                        {/* Content */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-between">
+                          {/* Title and Delete Button */}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <h3 className="text-base sm:text-lg font-semibold text-black truncate pr-2">
+                              {item.photo_title}
+                            </h3>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-gray-400 hover:text-red-600 flex-shrink-0 h-8 w-8"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          
+                          {/* Print Size */}
+                          <p className="text-xs sm:text-sm text-gray-500 mb-3">
+                            {t('printSize')}: {item.print_size}
+                          </p>
+                          
+                          {/* Quantity and Price Row */}
+                          <div className="flex items-center justify-between gap-2">
+                            {/* Quantity Controls */}
+                            <div className="flex items-center gap-1 sm:gap-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                                className="h-8 w-8 rounded-lg"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </Button>
+                              <span className="w-8 sm:w-10 text-center font-medium text-sm">
+                                {item.quantity}
+                              </span>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                                className="h-8 w-8 rounded-lg"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </Button>
+                            </div>
+                            
+                            {/* Price */}
+                            <span className="text-base sm:text-xl font-bold text-black whitespace-nowrap">
+                              {item.total_price?.toFixed(2)} {t('currency') || 'SAR'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+
+            {/* Order Summary */}
+            <div>
+              <Card className="p-6 bg-white border-none shadow-lg rounded-2xl sticky top-24">
+                <h3 className="text-xl font-semibold text-black mb-6">
+                  {t('orderSummary')}
+                </h3>
+                <div className="space-y-4 mb-6">
+                  <div className="flex justify-between text-gray-600">
+                    <span>{t('subtotal')}</span>
+                    <span className="font-medium">{calculateSubtotal().toFixed(2)} {t('currency') || 'SAR'}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>{t('shipping')}</span>
+                    <span className="font-medium">{calculateShipping().toFixed(2)} {t('currency') || 'SAR'}</span>
+                  </div>
+                  <div className="h-px bg-gray-200" />
+                  <div className="flex justify-between text-xl font-bold text-black">
+                    <span>{t('total')}</span>
+                    <span>{calculateTotal().toFixed(2)} {t('currency') || 'SAR'}</span>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => setShowCheckout(true)}
+                  className="w-full bg-black text-white hover:bg-gray-900 rounded-xl py-4 text-lg font-medium shadow-lg"
+                >
+                  {t('buyShipNow')}
+                </Button>
+                <p className="text-xs text-gray-500 text-center mt-4">
+                  {t('secureCheckout')}
+                </p>
+              </Card>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Checkout Dialog */}
+      <Dialog open={showCheckout} onOpenChange={setShowCheckout}>
+        <DialogContent className="sm:max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">
+              {orderComplete ? t('orderConfirmed') : t('shippingInformation')}
+            </DialogTitle>
+          </DialogHeader>
+
+          {orderComplete ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-center py-8"
+            >
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CheckCircle2 className="w-10 h-10 text-green-600" />
+              </div>
+              <h3 className="text-2xl font-semibold text-black mb-2">
+                {t('thankYou')}
+              </h3>
+              <p className="text-gray-600 mb-8">
+                {t('orderProcessing')}
+              </p>
+              <div className="flex gap-4 justify-center">
+                <Link to={createPageUrl("Profile")}>
+                  <Button className="bg-black text-white hover:bg-gray-900 rounded-xl px-6 py-3">
+                    {t('viewOrders')}
+                  </Button>
+                </Link>
+                <Link to={createPageUrl("Gallery")}>
+                  <Button variant="outline" className="rounded-xl px-6 py-3">
+                    {t('continueShopping')}
+                  </Button>
+                </Link>
+              </div>
+            </motion.div>
+          ) : (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Label>{t('fullName')} *</Label>
+                  <Input
+                    value={shippingInfo.full_name}
+                    onChange={(e) => setShippingInfo({...shippingInfo, full_name: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="John Doe"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Label>{t('addressLine1')} *</Label>
+                  <Input
+                    value={shippingInfo.address_line1}
+                    onChange={(e) => setShippingInfo({...shippingInfo, address_line1: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="123 Main Street"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Label>{t('addressLine2')}</Label>
+                  <Input
+                    value={shippingInfo.address_line2}
+                    onChange={(e) => setShippingInfo({...shippingInfo, address_line2: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="Apt 4B"
+                  />
+                </div>
+                <div>
+                  <Label>{t('city')} *</Label>
+                  <Input
+                    value={shippingInfo.city}
+                    onChange={(e) => setShippingInfo({...shippingInfo, city: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="New York"
+                  />
+                </div>
+                <div>
+                  <Label>{t('state')}</Label>
+                  <Input
+                    value={shippingInfo.state}
+                    onChange={(e) => setShippingInfo({...shippingInfo, state: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="NY"
+                  />
+                </div>
+                <div>
+                  <Label>{t('postalCode')} *</Label>
+                  <Input
+                    value={shippingInfo.postal_code}
+                    onChange={(e) => setShippingInfo({...shippingInfo, postal_code: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="10001"
+                  />
+                </div>
+                <div>
+                  <Label>{t('country')} *</Label>
+                  <Input
+                    value={shippingInfo.country}
+                    onChange={(e) => setShippingInfo({...shippingInfo, country: e.target.value})}
+                    className="mt-1 rounded-lg border-2"
+                    placeholder="United States"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4">
+                <Button
+                  onClick={handleCheckout}
+                  disabled={!isFormValid() || isProcessing}
+                  className="w-full bg-black text-white hover:bg-gray-900 rounded-xl py-4 text-lg font-medium"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      {t('processingOrder')}
+                    </>
+                  ) : (
+                    `${t('completePurchase')} - ${calculateTotal().toFixed(2)} ${t('currency') || 'SAR'}`
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
