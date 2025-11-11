@@ -45,9 +45,9 @@ export default async function LocaleLayout({
           <LanguageProvider initialLocale={locale as Locale}>
             <AuthProvider>
               <QueryProvider>
-                <div className="min-h-screen flex flex-col">
+                <div className="min-h-screen bg-white">
                   <Header />
-                  <main className="flex-1">
+                  <main>
                     {children}
                   </main>
                   <Footer />

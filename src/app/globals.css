@@ -4,6 +4,13 @@
 
 @layer base {
   :root {
+    --color-primary: #4F46E5;
+    --color-secondary: #7C3AED;
+    --color-accent: #06B6D4;
+    --color-background: #FFFFFF;
+    --color-surface: #F9FAFB;
+    --color-border: #E5E7EB;
+    
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
@@ -52,9 +59,17 @@
 @layer base {
   * {
     @apply border-border;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+  
   body {
     @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  }
+
+  [dir="rtl"] {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   }
 }
 
@@ -226,5 +241,18 @@
   .required::after {
     content: " *";
     color: hsl(var(--destructive));
+  }
+
+  .smooth-transition {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  .glass-effect {
+    backdrop-filter: blur(20px) saturate(180%);
+    background-color: rgba(255, 255, 255, 0.72);
   }
 }

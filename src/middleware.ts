@@ -37,7 +37,7 @@ export default async function middleware(req: NextRequest) {
   )
   const isPublicPage = publicPathnameRegex.test(req.nextUrl.pathname)
 
-  let response: NextResponse
+  let response: NextResponse | undefined
 
   if (isPublicPage) {
     response = intlMiddleware(req)
@@ -46,6 +46,7 @@ export default async function middleware(req: NextRequest) {
   }
 
   // Apply security headers to all responses
+  // If no response, SecurityHeaders.applyToResponse will create a NextResponse.next()
   return SecurityHeaders.applyToResponse(response)
 }
 

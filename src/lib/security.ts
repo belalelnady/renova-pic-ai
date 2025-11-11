@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import crypto from 'crypto'
 
@@ -244,11 +244,26 @@ export class SecurityHeaders {
     }
   }
 
-  static applyToResponse(response: Response): Response {
+  static applyToResponse(response: Response | NextResponse | undefined): Response | NextResponse {
+    // If no response provided, create a new NextResponse
+    if (!response) {
+      response = NextResponse.next()
+    }
+    
+    // Ensure response has headers property
+    if (!response.headers) {
+      return response
+    }
+    
     const headers = this.getSecurityHeaders()
     
     Object.entries(headers).forEach(([key, value]) => {
-      response.headers.set(key, value)
+      try {
+        response!.headers.set(key, value)
+      } catch (error) {
+        // Silently ignore header setting errors in development
+        console.warn(`Failed to set security header ${key}:`, error)
+      }
     })
     
     return response
