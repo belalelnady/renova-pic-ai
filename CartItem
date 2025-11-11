@@ -1,0 +1,46 @@
+{
+  "name": "CartItem",
+  "type": "object",
+  "properties": {
+    "user": {
+      "type": "string",
+      "description": "User email who owns this cart item"
+    },
+    "photo_id": {
+      "type": "string",
+      "description": "Reference to the Photo entity"
+    },
+    "photo_title": {
+      "type": "string"
+    },
+    "photo_url": {
+      "type": "string"
+    },
+    "print_size": {
+      "type": "string",
+      "enum": [
+        "8x10",
+        "11x14",
+        "16x20",
+        "24x36"
+      ],
+      "default": "8x10"
+    },
+    "quantity": {
+      "type": "number",
+      "default": 1
+    },
+    "price_per_item": {
+      "type": "number"
+    },
+    "total_price": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "photo_id",
+    "quantity",
+    "price_per_item",
+    "user"
+  ]
+}
