@@ -1,0 +1,1089 @@
+
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Upload, Save, Camera, Loader2, CheckCircle2, Sparkles, ShoppingCart, ArrowLeftRight } from "lucide-react"; // Added ArrowLeftRight
+import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate, useLocation } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { useLanguage } from "../components/LanguageContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import BeforeAfterSlider from "../components/BeforeAfterSlider";
+
+export default function EditPhoto() {
+  const { t, language } = useLanguage();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const resultsRef = useRef(null); // Added resultsRef
+  const [currentUser, setCurrentUser] = useState(null);
+  const [hasProcessedUrlParam, setHasProcessedUrlParam] = useState(false);
+
+  // Memoize EDITING_OPTIONS to prevent recreating on every render
+  const EDITING_OPTIONS = useMemo(() => [
+    {
+      id: "visa-photo",
+      title: t('visaPhoto'),
+      description: t('visaPhotoDesc'),
+      beforeImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/696468c25_SuadiGirlStock.jpg",
+      afterImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/ef04c34c9_edited-1762135507325.png",
+      webhook: "https://n8n.renovaai.cloud/webhook/visa-photo",
+      category: "id"
+    },
+    {
+      id: "absher-photo",
+      title: t('absherPhoto'),
+      description: t('absherPhotoDesc'),
+      beforeImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/7bdf0723b_cb29c697-363d-4425-8d5d-b962778da4de.jpg",
+      afterImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/802c4bf66_edited-1762293811459.png",
+      webhook: "https://n8n.renovaai.cloud/webhook/absher",
+      category: "id"
+    },
+    {
+      id: "saudi-look",
+      title: t('saudiLook'),
+      description: t('saudiLookDesc'),
+      beforeImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/5b2b3e3d3_wmremove-transformed.jpeg",
+      afterImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/7612d4414_edited-1762283151951.png",
+      webhook: "https://n8n.renovaai.cloud/webhook/saudi-look",
+      category: "portrait"
+    },
+    {
+      id: "baby-photo",
+      title: t('babyPhoto'),
+      description: t('babyPhotoDesc'),
+      beforeImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/d52860589_SuadiGirlStock2.jpg",
+      afterImage: "https://base44.app/api/apps/690011e6637df3b25a370af7/files/public/690011e6637df3b25a370af7/df0edddc2_edited-1762134073577.png",
+      webhook: "https://n8n.renovaai.cloud/webhook/baby-photo",
+      category: "id"
+    }
+  ], [t]);
+
+  // Portrait Photography Sizes - Memoized
+  const PORTRAIT_SIZES = useMemo(() => [
+    { size: "A5", price: 45, label: 'A5 (15×20 سم)', labelEn: 'A5 (15×20 cm)', description: language === 'ar' ? 'مقاس قياسي للبورتريه' : 'Standard portrait size' },
+    { size: "A4", price: 65, label: 'A4 (30×20 سم)', labelEn: 'A4 (30×20 cm)', description: language === 'ar' ? 'مقاس أكبر للبورتريه' : 'Larger portrait size' },
+  ], [language]);
+
+  // ID/Visa Photography Package - Memoized
+  const ID_PACKAGE = useMemo(() => ({
+    base: {
+      size: "A5+8ID",
+      price: 35,
+      label: language === 'ar' ? 'A5 + 8 صور هوية' : 'A5 + 8 ID pictures',
+      description: language === 'ar' ? 'صورة A5 + 8 صور هوية' : 'One A5 photo + 8 ID pictures'
+    },
+    extraPrints: {
+      price: 15,
+      quantity: 8,
+      label: language === 'ar' ? '8 نسخ إضافية' : '8 extra prints',
+      description: language === 'ar' ? 'نفس الصورة، 8 نسخ كحد أدنى' : 'Same picture, 8 pieces minimum'
+    }
+  }), [language]);
+
+  const [selectedOption, setSelectedOption] = useState(null);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [showCameraDialog, setShowCameraDialog] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [photoTitle, setPhotoTitle] = useState("");
+  const [originalImageUrl, setOriginalImageUrl] = useState(null);
+  const [processedImageUrl, setProcessedImageUrl] = useState(null);
+  const [editedImageBase44Url, setEditedImageBase44Url] = useState(null);
+  const [showResult, setShowResult] = useState(false);
+  const [selectedSize, setSelectedSize] = useState("A5");
+  const [selectedQuantity, setSelectedQuantity] = useState(1);
+  const [addFrame, setAddFrame] = useState(false);
+  const [extraPrintSets, setExtraPrintSets] = useState(0);
+  const [isMobile] = useState(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [viewMode, setViewMode] = useState("slider"); // Added viewMode state
+
+  // Scroll to top only once on mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, []);
+
+  // Fetch user once on mount
+  useEffect(() => {
+    let mounted = true;
+    
+    const fetchUser = async () => {
+      try {
+        const user = await base44.auth.me();
+        if (mounted) {
+          setCurrentUser(user);
+        }
+      } catch (error) {
+        console.error("Error fetching user:", error);
+      }
+    };
+    fetchUser();
+    
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Auto-open tool from URL parameter - ONLY ONCE
+  useEffect(() => {
+    if (hasProcessedUrlParam) return;
+    
+    const urlParams = new URLSearchParams(location.search);
+    const toolId = urlParams.get('tool');
+    
+    if (toolId && EDITING_OPTIONS.length > 0) {
+      const tool = EDITING_OPTIONS.find(opt => opt.id === toolId);
+      if (tool) {
+        console.log("Auto-selecting tool from URL:", toolId);
+        setSelectedOption(tool);
+        setHasProcessedUrlParam(true);
+        
+        const timer = setTimeout(() => {
+          setShowUploadDialog(true);
+        }, 150);
+        
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [location.search, EDITING_OPTIONS, hasProcessedUrlParam]);
+
+  // Scroll to results section when showResult becomes true
+  useEffect(() => {
+    if (showResult && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showResult]);
+
+  const calculatePrice = () => {
+    if (!selectedOption) return 0;
+
+    if (selectedOption.category === "portrait") {
+      const sizeOption = PORTRAIT_SIZES.find(s => s.size === selectedSize);
+      let total = sizeOption ? sizeOption.price * selectedQuantity : 0;
+
+      if (addFrame) {
+        total += 20 * selectedQuantity;
+      }
+
+      return total;
+    } else {
+      let total = ID_PACKAGE.base.price;
+      total += extraPrintSets * ID_PACKAGE.extraPrints.price;
+      return total;
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: isMobile ? 'environment' : 'user' },
+        audio: false
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setIsCameraReady(true);
+    } catch (err) {
+      console.error("Error accessing camera:", err);
+      alert("Could not access camera. Please check permissions.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraReady(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current || !isCameraReady) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoRef.current, 0, 0);
+
+    canvas.toBlob(async (blob) => {
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      setShowCameraDialog(false);
+      stopCamera();
+      await processPhoto(file);
+    }, 'image/jpeg', 0.95);
+  };
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setShowUploadDialog(false);
+    await processPhoto(file);
+  };
+
+  const processPhoto = async (file) => {
+    if (!selectedOption) return;
+
+    setIsUploading(true);
+    setPhotoTitle(file.name.replace(/\.[^/.]+$/, ""));
+
+    try {
+      console.log("=== STARTING PHOTO PROCESSING ===");
+      console.log("Selected option:", selectedOption.id);
+
+      console.log("Step 1: Uploading to Base44...");
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      console.log("✓ Upload complete, file URL:", file_url);
+
+      setOriginalImageUrl(file_url);
+      setIsUploading(false);
+      setIsProcessing(true);
+
+      const webhookUrl = selectedOption.webhook;
+
+      const requestData = {
+        image_url: file_url,
+        editing_type: selectedOption.id,
+        original_url: file_url
+      };
+
+      console.log("Step 2: Sending to webhook...");
+      console.log("Webhook URL:", webhookUrl);
+      console.log("Request payload:", JSON.stringify(requestData, null, 2));
+
+      const fetchWithTimeout = (url, options, timeout = 90000) => {
+        return Promise.race([
+          fetch(url, options),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Request timeout after 90 seconds')), timeout)
+          )
+        ]);
+      };
+
+      const response = await fetchWithTimeout(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData),
+      }, 90000);
+
+      console.log("✓ Webhook response received");
+      console.log("Response status:", response.status);
+      console.log("Response ok:", response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Webhook error response:", errorText);
+        throw new Error(`Webhook failed with status ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log("✓ Webhook JSON response:", JSON.stringify(result, null, 2));
+
+      let editedImageUrl = null;
+
+      if (Array.isArray(result) && result.length > 0) {
+        const firstItem = result[0];
+        editedImageUrl = firstItem.photo_url || firstItem.url || firstItem.image_url || firstItem.processed_url || firstItem.edited_url;
+        console.log("✓ Extracted URL from array format:", editedImageUrl);
+      }
+      else if (typeof result === 'object' && result !== null) {
+        editedImageUrl = result.photo_url || result.url || result.processed_url || result.image_url || result.edited_url;
+        console.log("✓ Extracted URL from object format:", editedImageUrl);
+      }
+
+      console.log("Final edited image URL:", editedImageUrl);
+
+      if (!editedImageUrl) {
+        console.error("No URL found in response:", result);
+        throw new Error("No edited image URL found in webhook response");
+      }
+
+      if (editedImageUrl === file_url) {
+        console.warn("⚠ Warning: Edited URL is same as original");
+      }
+
+      setProcessedImageUrl(editedImageUrl);
+
+      console.log("Step 3: Downloading edited image...");
+      const imageResponse = await fetch(editedImageUrl);
+
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download edited image: ${imageResponse.status}`);
+      }
+
+      const imageBlob = await imageResponse.blob();
+      console.log("✓ Downloaded image, size:", imageBlob.size, "bytes");
+
+      const editedFile = new File([imageBlob], `edited-${Date.now()}.png`, { type: 'image/png' });
+
+      console.log("Step 4: Uploading edited image to Base44...");
+      const { file_url: editedBase44Url } = await base44.integrations.Core.UploadFile({ file: editedFile });
+      console.log("✓ Edited image uploaded to Base44:", editedBase44Url);
+
+      setEditedImageBase44Url(editedBase44Url);
+      setShowResult(true);
+      setIsProcessing(false);
+
+      console.log("=== PROCESSING COMPLETE ===");
+
+    } catch (error) {
+      console.error("=== PROCESSING ERROR ===");
+      console.error("Error type:", error.name);
+      console.error("Error message:", error.message);
+      console.error("Full error:", error);
+
+      let errorMessage = error.message;
+
+      if (error.message.includes('Failed to fetch')) {
+        errorMessage = `Cannot connect to webhook. Please ensure the ${selectedOption.id} webhook is configured at: ${selectedOption.webhook}`;
+      }
+
+      alert(`Error processing photo: ${errorMessage}`);
+      setProcessedImageUrl(originalImageUrl);
+      setEditedImageBase44Url(originalImageUrl);
+      setShowResult(true);
+      setIsProcessing(false);
+    }
+  };
+
+  const savePhotoMutation = useMutation({
+    mutationFn: async (photoData) => {
+      console.log("=== SAVING PHOTO TO DATABASE ===");
+      console.log("Photo data:", photoData);
+      
+      // First create the photo
+      const savedPhoto = await base44.entities.Photo.create(photoData);
+      console.log("✓ Photo saved to database:", savedPhoto);
+
+      // Then automatically add it to cart
+      const cartData = {
+        user: currentUser.email,
+        photo_id: savedPhoto.id,
+        photo_title: photoData.title,
+        photo_url: photoData.edited_url,
+        print_size: photoData.print_size,
+        quantity: 1,
+        price_per_item: photoData.price,
+        total_price: photoData.price,
+        editing_settings: photoData.editing_settings
+      };
+
+      await base44.entities.CartItem.create(cartData);
+      console.log("✓ Photo added to cart");
+
+      // Send to webhook
+      const webhookUrl = 'https://n8n.renovaai.cloud/webhook/app-database';
+
+      const webhookPayload = {
+        action: 'photo_created',
+        event: 'photo_saved',
+        timestamp: new Date().toISOString(),
+        data: {
+          id: savedPhoto.id,
+          user: savedPhoto.user,
+          title: savedPhoto.title,
+          ai_tool: savedPhoto.ai_tool,
+          original_url: savedPhoto.original_url,
+          edited_url: savedPhoto.edited_url,
+          thumbnail_url: savedPhoto.thumbnail_url,
+          editing_settings: savedPhoto.editing_settings,
+          price: savedPhoto.price,
+          print_size: savedPhoto.print_size,
+          status: savedPhoto.status,
+          created_date: savedPhoto.created_date
+        }
+      };
+
+      console.log("=== SENDING TO WEBHOOK ===");
+      console.log("Webhook payload:", JSON.stringify(webhookPayload, null, 2));
+
+      try {
+        console.log(`Sending to webhook: ${webhookUrl}`);
+        
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(webhookPayload)
+        });
+
+        console.log(`Webhook response status:`, response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Webhook failed with status ${response.status}:`, errorText);
+          throw new Error(`Webhook failed: ${response.status} - ${errorText}`);
+        }
+
+        const responseData = await response.json().catch(() => null);
+        console.log(`✓ Webhook success:`, responseData);
+        
+      } catch (error) {
+        console.error(`✗ Webhook error:`, error.message);
+      }
+
+      return savedPhoto;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['photos'] });
+      queryClient.invalidateQueries({ queryKey: ['cartItems'] });
+      setShowSuccessDialog(true);
+    },
+    onError: (error) => {
+      console.error("=== SAVE PHOTO ERROR ===");
+      console.error("Error:", error);
+      alert(`Failed to save photo: ${error.message}`);
+    }
+  });
+
+  const handleSavePhoto = async () => {
+    if (!editedImageBase44Url || !currentUser || !selectedOption) return;
+
+    const photoData = {
+      user: currentUser.email,
+      title: photoTitle || "Untitled Photo",
+      ai_tool: selectedOption.id, // Added this line as per the instructions
+      original_url: originalImageUrl,
+      edited_url: editedImageBase44Url,
+      thumbnail_url: editedImageBase44Url,
+      editing_settings: {
+        ai_style: selectedOption.id,
+        category: selectedOption.category,
+        size: selectedSize,
+        quantity: selectedOption.category === "portrait" ? selectedQuantity : 1,
+        addFrame: selectedOption.category === "portrait" ? addFrame : false,
+        extraPrintSets: selectedOption.category === "id" ? extraPrintSets : 0
+      },
+      status: "published",
+      price: calculatePrice(),
+      print_size: selectedOption.category === "portrait" ? selectedSize : ID_PACKAGE.base.size // Ensure print_size for ID is correct
+    };
+
+    savePhotoMutation.mutate(photoData);
+  };
+
+  const handleOptionClick = (option) => {
+    setSelectedOption(option);
+    setShowUploadDialog(true);
+    // Reset selections
+    if (option.category === "portrait") {
+      setSelectedSize("A5");
+      setSelectedQuantity(1);
+      setAddFrame(false);
+      setExtraPrintSets(0);
+    } else { // "id" category
+      setSelectedSize("A5+8ID");
+      setExtraPrintSets(0);
+      setSelectedQuantity(1); // Quantity is always 1 for the base ID package
+      setAddFrame(false); // Frames not applicable for ID photos
+    }
+  };
+
+  const handleStartOver = () => {
+    setShowResult(false);
+    setOriginalImageUrl(null);
+    setProcessedImageUrl(null);
+    setEditedImageBase44Url(null);
+    setPhotoTitle("");
+    setSelectedOption(null);
+    setSelectedSize("A5"); // Reset to default portrait size
+    setSelectedQuantity(1); // Reset to default quantity
+    setAddFrame(false);
+    setExtraPrintSets(0);
+    setHasProcessedUrlParam(false); // Reset URL param processing flag
+    setViewMode("slider"); // Reset view mode
+  };
+
+  // Camera cleanup
+  useEffect(() => {
+    let mounted = true;
+    
+    if (showCameraDialog && mounted) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    
+    return () => {
+      mounted = false;
+      stopCamera();
+    };
+  }, [showCameraDialog]);
+
+  return (
+    <div className="min-h-screen bg-[#F5F5F7] py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mb-12 text-center">
+          <h1 className="text-4xl sm:text-5xl font-bold text-black mb-4">
+            {t('aiPhotoStudio')}
+          </h1>
+          <p className="text-xl text-gray-600 font-light max-w-2xl mx-auto">
+            {t('chooseStyle')}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+          {EDITING_OPTIONS.map((option, index) => (
+            <motion.div
+              key={option.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: index * 0.1 }}
+            >
+              <Card
+                onClick={() => handleOptionClick(option)}
+                className="relative overflow-hidden bg-white border-none shadow-lg rounded-2xl cursor-pointer hover:shadow-2xl smooth-transition group"
+              >
+                {/* Before/After Split View */}
+                <div className="relative aspect-square">
+                  <div className="grid grid-cols-2 h-full">
+                    {/* Before Image */}
+                    <div className="relative overflow-hidden">
+                      <img
+                        src={option.beforeImage}
+                        alt="Before"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                        Before
+                      </div>
+                    </div>
+                    {/* After Image */}
+                    <div className="relative overflow-hidden">
+                      <img
+                        src={option.afterImage}
+                        alt="After"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-2 right-2 bg-green-600 text-white text-xs px-2 py-1 rounded">
+                        After
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hover Overlay */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 smooth-transition pointer-events-none" />
+                </div>
+
+                {/* Card Footer with Title and Description */}
+                <div className="p-5 bg-gradient-to-r from-blue-600 to-purple-600 group-hover:from-blue-700 group-hover:to-purple-700 smooth-transition">
+                  <h3 className="text-white text-lg font-bold mb-2 text-center">
+                    {option.title}
+                  </h3>
+                  <p className="text-white/90 text-sm text-center leading-relaxed min-h-[40px]">
+                    {option.description}
+                  </p>
+                </div>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+
+        <AnimatePresence>
+          {(isUploading || isProcessing) && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+            >
+              <Card className="p-8 bg-white border-none shadow-2xl rounded-2xl text-center max-w-md mx-4">
+                <Loader2 className="w-16 h-16 animate-spin text-black mx-auto mb-4" />
+                <h3 className="text-2xl font-semibold text-black mb-2">
+                  {isUploading ? t('uploadingPhoto') : t('processingImageNow')}
+                </h3>
+                <p className="text-gray-600 mb-2">
+                  {isUploading ? t('preparingImage') : t('alwaleedProcessing')}
+                </p>
+                {isProcessing && (
+                  <>
+                    <p className="text-sm text-gray-500 mb-2">
+                      {t('mayTake30Seconds')}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {t('pleaseWait')}
+                    </p>
+                  </>
+                )}
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showResult && processedImageUrl && (
+            <motion.div
+              ref={resultsRef}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="max-w-6xl mx-auto"
+            >
+              <Card className="p-6 bg-white border-none shadow-2xl rounded-2xl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <CheckCircle2 className="w-7 h-7 text-green-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-semibold text-black">
+                        {t('processingComplete')}
+                      </h3>
+                      <p className="text-gray-600">
+                        {selectedOption?.title} {t('appliedSuccessfully')}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={() => setViewMode(viewMode === "slider" ? "sidebyside" : "slider")}
+                    variant="outline"
+                    className="border-2 border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50 rounded-xl px-4 py-2.5 font-medium whitespace-nowrap"
+                  >
+                    <ArrowLeftRight className="w-5 h-5 mr-2" />
+                    {viewMode === "sidebyside" 
+                      ? (language === 'ar' ? 'عرض المنزلق' : 'Slider View') 
+                      : (language === 'ar' ? 'عرض جنباً إلى جنب' : 'Side by Side')
+                    }
+                  </Button>
+                </div>
+
+                <div className="mb-6">
+                  {viewMode === "sidebyside" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="relative">
+                        <div className="aspect-video max-h-[600px] bg-black rounded-2xl overflow-hidden">
+                          <img
+                            src={originalImageUrl}
+                            alt="Before"
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div className="absolute top-3 left-3 bg-black/70 text-white text-sm font-bold px-4 py-2 rounded-full">
+                          {language === 'ar' ? 'قبل' : 'Before'}
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <div className="aspect-video max-h-[600px] bg-black rounded-2xl overflow-hidden">
+                          <img
+                            src={processedImageUrl}
+                            alt="After"
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div className="absolute top-3 right-3 bg-green-600 text-white text-sm font-bold px-4 py-2 rounded-full">
+                          {language === 'ar' ? 'بعد' : 'After'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <BeforeAfterSlider
+                      beforeImage={originalImageUrl}
+                      afterImage={processedImageUrl}
+                      className="aspect-video max-h-[600px] rounded-2xl"
+                      altText={`${selectedOption?.title} before and after comparison`}
+                    />
+                  )}
+                </div>
+
+                <Input
+                  value={photoTitle}
+                  onChange={(e) => setPhotoTitle(e.target.value)}
+                  placeholder={t('enterPhotoTitle')}
+                  className="text-lg font-medium border-2 border-gray-200 rounded-xl py-6 mb-6"
+                />
+
+                <div className="bg-gray-50 rounded-2xl p-6 mb-6">
+                  {selectedOption?.category === "portrait" ? (
+                    <>
+                      {/* Portrait Photography Options */}
+                      <h4 className="text-lg font-bold text-black mb-4">
+                        {language === 'ar' ? 'خيارات تصوير البورتريه' : 'Portrait Photography Options'}
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        {PORTRAIT_SIZES.map((printSize) => (
+                          <button
+                            key={printSize.size}
+                            onClick={() => setSelectedSize(printSize.size)}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                              selectedSize === printSize.size
+                                ? 'border-black bg-black text-white'
+                                : 'border-gray-300 bg-white text-black hover:border-black'
+                            }`}
+                          >
+                            <div className="font-bold text-xl mb-1">
+                              {language === 'ar' ? printSize.label : printSize.labelEn}
+                            </div>
+                            <div className="text-sm opacity-80 mb-2">{printSize.description}</div>
+                            <div className="text-lg font-semibold">{printSize.price} {language === 'ar' ? 'ر.س' : 'SAR'}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Quantity Selector */}
+                      <div className="mb-6">
+                        <label className="block text-sm font-bold text-black mb-3">
+                          {language === 'ar' ? 'الكمية' : 'Quantity'}
+                        </label>
+                        <div className="flex items-center gap-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setSelectedQuantity(Math.max(1, selectedQuantity - 1))}
+                            className="w-12 h-12 rounded-xl border-2"
+                          >
+                            -
+                          </Button>
+                          <span className="text-2xl font-bold min-w-[60px] text-center">{selectedQuantity}</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setSelectedQuantity(selectedQuantity + 1)}
+                            className="w-12 h-12 rounded-xl border-2"
+                          >
+                            +
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Frame Option */}
+                      <div className="border-t border-gray-200 pt-6">
+                        <button
+                          onClick={() => setAddFrame(!addFrame)}
+                          className={`w-full p-4 rounded-xl border-2 transition-all text-left ${
+                            addFrame
+                              ? 'border-black bg-black text-white'
+                              : 'border-gray-300 bg-white text-black hover:border-black'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-bold text-lg mb-1">
+                                {language === 'ar' ? 'إضافة إطار' : 'Add Frame'}
+                              </div>
+                              <div className="text-sm opacity-80">
+                                {language === 'ar' ? 'إطار أنيق لصورتك' : 'Elegant frame for your photo'}
+                              </div>
+                            </div>
+                            <div className="text-xl font-bold">
+                              +20 {language === 'ar' ? 'ر.س' : 'SAR'}
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* ID/Visa Photography Options */}
+                      <h4 className="text-lg font-bold text-black mb-4">
+                        {language === 'ar' ? 'خيارات تصوير الهوية/التأشيرة' : 'ID/Visa Photography Options'}
+                      </h4>
+
+                      {/* Base Package */}
+                      <div className="p-4 rounded-xl border-2 border-black bg-black text-white mb-6">
+                        <div className="font-bold text-xl mb-1">{ID_PACKAGE.base.label}</div>
+                        <div className="text-sm opacity-80 mb-2">{ID_PACKAGE.base.description}</div>
+                        <div className="text-2xl font-bold">{ID_PACKAGE.base.price} {language === 'ar' ? 'ر.س' : 'SAR'}</div>
+                      </div>
+
+                      {/* Extra Prints */}
+                      <div className="border-t border-gray-200 pt-6">
+                        <label className="block text-sm font-bold text-black mb-3">
+                          {language === 'ar' ? 'نسخ إضافية (8 نسخ لكل مجموعة)' : 'Extra Prints (8 pieces per set)'}
+                        </label>
+                        <div className="flex items-center gap-4 mb-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setExtraPrintSets(Math.max(0, extraPrintSets - 1))}
+                            className="w-12 h-12 rounded-xl border-2"
+                            disabled={extraPrintSets === 0}
+                          >
+                            -
+                          </Button>
+                          <span className="text-2xl font-bold min-w-[60px] text-center">{extraPrintSets}</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setExtraPrintSets(extraPrintSets + 1)}
+                            className="w-12 h-12 rounded-xl border-2"
+                          >
+                            +
+                          </Button>
+                          <div className="text-sm text-gray-600">
+                            {language === 'ar'
+                              ? `× 15 ر.س = ${extraPrintSets * 15} ر.س`
+                              : `× 15 SAR = ${extraPrintSets * 15} SAR`
+                            }
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {language === 'ar'
+                            ? 'كل مجموعة تحتوي على 8 صور هوية إضافية بنفس الصورة'
+                            : 'Each set contains 8 additional ID pictures of the same photo'
+                          }
+                        </p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Price Summary */}
+                  <div className="bg-white rounded-xl p-4 border-2 border-gray-200 mt-6">
+                    {selectedOption?.category === "portrait" ? (
+                      <>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-gray-600">
+                            {language === 'ar' ? 'السعر الأساسي' : 'Base Price'}:
+                          </span>
+                          <span className="text-gray-900 font-medium">
+                            {(PORTRAIT_SIZES.find(s => s.size === selectedSize)?.price || 0)} × {selectedQuantity} = {(PORTRAIT_SIZES.find(s => s.size === selectedSize)?.price || 0) * selectedQuantity} {language === 'ar' ? 'ر.س' : 'SAR'}
+                          </span>
+                        </div>
+                        {addFrame && (
+                          <div className="flex justify-between items-center mb-2 text-blue-600">
+                            <span>{language === 'ar' ? 'الإطار' : 'Frame'}:</span>
+                            <span className="font-medium">+{20 * selectedQuantity} {language === 'ar' ? 'ر.س' : 'SAR'}</span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="text-gray-600">
+                            {language === 'ar' ? 'الباقة الأساسية' : 'Base Package'}:
+                          </span>
+                          <span className="text-gray-900 font-medium">
+                            {ID_PACKAGE.base.price} {language === 'ar' ? 'ر.س' : 'SAR'}
+                          </span>
+                        </div>
+                        {extraPrintSets > 0 && (
+                          <div className="flex justify-between items-center mb-2 text-blue-600">
+                            <span>
+                              {language === 'ar' ? 'نسخ إضافية' : 'Extra Prints'} ({extraPrintSets} {language === 'ar' ? 'مجموعات' : 'sets'}):
+                            </span>
+                            <span className="font-medium">+{extraPrintSets * ID_PACKAGE.extraPrints.price} {language === 'ar' ? 'ر.س' : 'SAR'}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="border-t border-gray-200 pt-2 mt-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-bold text-black">
+                          {language === 'ar' ? 'الإجمالي' : 'Total'}:
+                        </span>
+                        <span className="text-2xl font-black text-black">
+                          {calculatePrice()} {language === 'ar' ? 'ر.س' : 'SAR'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-4">
+                  <Button
+                    onClick={handleStartOver}
+                    variant="outline"
+                    className="flex-1 border-2 border-black text-black hover:bg-black hover:text-white rounded-xl py-4 text-lg font-medium"
+                  >
+                    {t('editAnotherPhoto')}
+                  </Button>
+                  <Button
+                    onClick={handleSavePhoto}
+                    disabled={savePhotoMutation.isPending || !photoTitle || !editedImageBase44Url || !currentUser}
+                    className="flex-1 bg-black text-white hover:bg-gray-900 rounded-xl py-4 text-lg font-medium shadow-lg"
+                  >
+                    {savePhotoMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        {t('saving')}
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-5 h-5 mr-2" />
+                        {t('saveToGallery')}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              {selectedOption && (
+                <>
+                  <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-pink-600 rounded-xl flex items-center justify-center">
+                    <Upload className="w-6 h-6 text-white" />
+                  </div>
+                  {selectedOption.title}
+                </>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full bg-black text-white hover:bg-gray-900 rounded-xl py-6 text-lg font-medium"
+            >
+              <Upload className="w-5 h-5 mr-2" />
+              {t('uploadFromDevice')}
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-200" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-4 bg-white text-gray-500">{t('or')}</span>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => {
+                setShowUploadDialog(false);
+                setShowCameraDialog(true);
+              }}
+              variant="outline"
+              className="w-full border-2 border-black text-black hover:bg-black hover:text-white rounded-xl py-6 text-lg font-medium"
+            >
+              <Camera className="w-5 h-5 mr-2" />
+              {t('takePhoto')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCameraDialog} onOpenChange={setShowCameraDialog}>
+        <DialogContent className="sm:max-w-xl rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-2">
+              <Camera className="w-6 h-6" />
+              {t('takePhoto')}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="relative aspect-[4/3] bg-black rounded-xl overflow-hidden">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {!isCameraReady && (
+              <div className="absolute inset-0 flex items-center justify-center text-white">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                  {t('startingCamera')}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex justify-end gap-3 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowCameraDialog(false)}
+              className="rounded-xl"
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              onClick={capturePhoto}
+              disabled={!isCameraReady}
+              className="bg-black text-white hover:bg-gray-900 rounded-xl"
+            >
+              <Camera className="w-4 h-4 mr-2" />
+              {t('capturePhoto')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog - After Saving Photo */}
+      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8 text-green-600" />
+                </div>
+                {t('processingComplete')}
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4 text-center">
+            <p className="text-gray-600">
+              {language === 'ar'
+                ? 'تم حفظ صورتك بنجاح وإضافتها إلى سلة التسوق! هل تريد تجربة أدوات تحرير أخرى أم المتابعة إلى سلة التسوق؟'
+                : 'Your photo has been saved successfully and added to your cart! Would you like to try other editing tools or proceed to cart?'
+              }
+            </p>
+            <div className="flex flex-col gap-3 pt-2">
+              <Button
+                onClick={() => {
+                  setShowSuccessDialog(false);
+                  handleStartOver();
+                }}
+                className="w-full bg-black text-white hover:bg-gray-900 rounded-xl py-4 text-lg font-medium"
+              >
+                <Sparkles className="w-5 h-5 mr-2" />
+                {language === 'ar' ? 'جرب أداة أخرى' : 'Try Another Tool'}
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowSuccessDialog(false);
+                  navigate(createPageUrl("Cart"));
+                }}
+                variant="outline"
+                className="w-full border-2 border-black text-black hover:bg-black hover:text-white rounded-xl py-4 text-lg font-medium"
+              >
+                <ShoppingCart className="w-5 h-5 mr-2" />
+                {language === 'ar' ? 'المتابعة إلى سلة التسوق' : 'Proceed to Cart'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
